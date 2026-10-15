@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=450, initial-scale=1, user-scalable=no">
+<title>弹踢道场 · harness</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #05070f; height: 100%; }
+  body { display: flex; align-items: center; justify-content: center; }
+  #frame { width: 450px; height: 800px; box-shadow: 0 0 40px rgba(0,0,0,.8); }
+  canvas { display: block; width: 450px; height: 800px; touch-action: none; }
+</style>
+</head>
+<body>
+<div id="frame">
+  <canvas id="game" width="450" height="800"></canvas>
+</div>
+<script>
+/* ---- 极简 CommonJS 加载器（同步 XHR） ---- */
+const modules = {};
+function resolve(p, fromDir) {
+  const base = (fromDir || '').split('/').slice(0, -1);
+  p.split('/').forEach(seg => {
+    if (seg === '..') base.pop();
+    else if (seg !== '.' && seg !== '') base.push(seg);
+  });
+  return base.join('/');
+}
+function load(path, fromDir) {
+  const full = resolve(path, fromDir || '');
+  if (modules[full]) return modules[full].exports;
+  const m = { exports: {} };
+  modules[full] = m;
+  const xhr = new XMLHttpRequest();
+  xhr.open('GET', '/' + full, false);
+  xhr.send();
+  if (xhr.status !== 200) throw new Error('load fail ' + full + ' ' + xhr.status);
+  const fn = new Function('module', 'exports', 'require', '__dirname', xhr.responseText);
+  const localRequire = p => load(p, full);
+  fn(m, m.exports, localRequire, full.split('/').slice(0, -1).join('/'));
+  return m.exports;
+}
+
+/* ---- wx 浏览器 shim ---- */
+const canvas = document.getElementById('game');
+const rectOf = () => canvas.getBoundingClientRect();
+function touchLike(e, id) {
+  const r = rectOf();
+  return { identifier: id != null ? id : 0, clientX: e.clientX - r.left, clientY: e.clientY - r.top };
+}
+const startH = [], endH = [], cancelH = [];
+globalThis.wx = {
+  getSystemInfoSync: () => ({ windowWidth: 450, windowHeight: 800, pixelRatio: 1 }),
+  createCanvas: () => canvas,
+  onTouchStart: h => startH.push(h),
+  onTouchEnd: h => endH.push(h),
+  onTouchCancel: h => cancelH.push(h),
+  onShow: () => {},
+  // harness 默认静音（自动化会连推数千帧，避免 WebAudio 排队）
+  createWebAudioContext: () => { throw new Error("muted in harness"); },
+};
+function dispatch(list, ev) { list.forEach(h => h(ev)); }
+canvas.addEventListener('mousedown', e => { e.preventDefault(); dispatch(startH, { changedTouches: [touchLike(e)] }); });
+window.addEventListener('mouseup', e => dispatch(endH, { changedTouches: [touchLike(e)] }));
+canvas.addEventListener('touchstart', e => { e.preventDefault(); dispatch(startH, { changedTouches: [].map.call(e.changedTouches, t => touchLike(t, t.identifier)) }); }, { passive: false });
+window.addEventListener('touchend', e => dispatch(endH, { changedTouches: [].map.call(e.changedTouches, t => touchLike(t, t.identifier)) }));
+
+/* ---- 启动小游戏 ---- */
+load('js/main.js');
+</script>
+</body>
+</html>
