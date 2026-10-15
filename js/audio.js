@@ -82,7 +82,15 @@
         case "perilDash":
           tone(520, 0.18, { type: "sawtooth", freq2: 180, vol: 0.07 });
           break;
-        case "fire": tone(680, 0.12, { type: "sine", freq2: 280, vol: 0.07 }); break;
+        case "drum": // 花鼓灯「隆·咚」：低鼓膜音 + 一记鼓皮噪声
+          tone(150, 0.2, { type: "sine", freq2: 62, vol: 0.22 });
+          noise(0.05, { cutoff: 380, vol: 0.12 });
+          break;
+        case "fire": // 第三拍「哐」：出球音本身落在鼓点上
+          tone(680, 0.12, { type: "sine", freq2: 280, vol: 0.07 });
+          tone(130, 0.18, { type: "sine", freq2: 58, vol: 0.16 });
+          noise(0.06, { cutoff: 500, vol: 0.1 });
+          break;
         case "peril":
         case "perilFire":
           tone(300, 0.1, { type: "square", vol: 0.1 });

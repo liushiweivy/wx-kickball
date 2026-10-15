@@ -87,6 +87,11 @@
 
   function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
+  // 蓄力鼓点节拍（返回 0/1/2/3）：内核鼓声与渲染三点指示灯共用同一公式。
+  // 不变量：castDur/3 必须大于单帧上限 0.05s（当前最短蓄力 0.34s，安全），
+  // 否则一个钳制大步可能整拍跳空、漏发鼓声。
+  function telegraphBeat(stateT, castDur) { return Math.floor(stateT / (castDur / 3)); }
+
   function makePlayer() {
     return {
       x: CFG.WORLD_W / 2,
@@ -112,6 +117,7 @@
     this.player = makePlayer();
     this.enemy = null;
     this.balls = [];
+    this.floatTexts = [];
     this.held = { left: false, right: false };
     this.events = [];
     this.fx = [];
@@ -130,6 +136,7 @@
     this.player = makePlayer();
     this.balls = [];
     this.fx = [];
+    this.floatTexts = [];
     this.stats = {
       perfectKicks: 0, lowKicks: 0, dashThroughs: 0,
       returnHits: 0, kills: 0, clearT: 0,
@@ -142,6 +149,7 @@
     if (this.mode !== "death") return;
     this.player = makePlayer();
     this.balls = [];
+    this.floatTexts = [];
     this.spawnWave(this.waveIndex);
     this.mode = "fight";
   };
@@ -219,6 +227,15 @@
     this.fx.push({ kind: "ring", x: x, y: y, t: 0, life: 0.34, color: color });
   };
 
+  // 招式名飘字（花鼓灯梗：闪身步 / 浪子踢球 / 哆嗦毛）
+  Game.prototype.spawnFloat = function (x, y, text, color, size) {
+    this.floatTexts.push({
+      // 最宽飘字约 120px（半宽 60），横向夹取防止贴墙时出屏被裁切
+      x: clamp(x, 64, CFG.WORLD_W - 64), y: y, text: text, t: 0, life: 0.95,
+      color: color, size: size || 22,
+    });
+  };
+
   /* ---------- 主推进 ---------- */
 
   Game.prototype.update = function (dt) {
@@ -259,6 +276,14 @@
       if (f.t < f.life) next.push(f);
     }
     this.fx = next;
+    var ftNext = [];
+    for (var j = 0; j < this.floatTexts.length; j++) {
+      var ft = this.floatTexts[j];
+      ft.t += dt;
+      ft.y -= 34 * dt;
+      if (ft.t < ft.life) ftNext.push(ft);
+    }
+    this.floatTexts = ftNext;
   };
 
   /* ---------- 玩家 ---------- */
@@ -277,6 +302,7 @@
       p.state = "break";
       p.stateT = 0;
       p.posture = CFG.MAX_POSTURE;
+      this.spawnFloat(p.x, CFG.PLAYER_Y - 104, "哆嗦毛…", "#ff8a7a", 18);
       this.events.push("break");
     }
     if (p.postDelay > 0) p.postDelay -= dt;
@@ -334,9 +360,16 @@
       case "idle":
         if (e.stateT >= e.idleUntil) this.chooseAttack();
         break;
-      case "telegraph":
+      case "telegraph": {
+        // 花鼓灯鼓点：蓄力三等分，前两拍敲鼓（隆·咚），第三拍出球（哐）
+        var beat = telegraphBeat(e.stateT, e.castDur);
+        if (beat > (e.lastBeat || 0) && beat < 3) {
+          e.lastBeat = beat;
+          this.events.push("drum");
+        }
         if (e.stateT >= e.castDur) this.fireBall(e);
         break;
+      }
       case "hurt":
         if (e.stateT >= CFG.HURT_ENEMY) { e.state = "idle"; e.stateT = 0; e.idleUntil = 0.15; }
         break;
@@ -361,6 +394,7 @@
     var peril = w.perilChance > 0 && this.rng() < w.perilChance;
     e.state = "telegraph";
     e.stateT = 0;
+    e.lastBeat = 0;
     e.castKind = peril ? "peril" : "normal";
     e.castDur = w.cast * (peril ? 1.35 : 1);
     e.comboLeft = (!peril && w.comboChance > 0 && this.rng() < w.comboChance) ? 1 : 0;
@@ -387,6 +421,7 @@
       e.comboLeft = 0;
       e.state = "telegraph";
       e.stateT = 0;
+      e.lastBeat = 0;
       e.castKind = "normal";
       e.castDur = 0.34;
       this.events.push("combo");
@@ -437,6 +472,7 @@
       if (p.invuln > 0) {
         this.stats.dashThroughs++;
         this.spawnSparks(cx, cy, 8, "#bcd8ff", 0.7);
+        this.spawnFloat(p.x, CFG.PLAYER_Y - 104, "闪身步！", "#7fe4ef", 24);
         this.events.push("perilDash");
       } else {
         this.damagePlayer(CFG.PERIL_HP, CFG.PERIL_P_POST, true);
@@ -461,6 +497,7 @@
       this.spawnSparks(cx, cy, 12, "#ffd98a", 1);
       this.shake = 0.18;
       this.stats.perfectKicks++;
+      this.spawnFloat(p.x, CFG.PLAYER_Y - 104, "浪子踢球！", "#ffd45e", 24);
       this.events.push("perfectKick");
       return;
     }
@@ -481,6 +518,7 @@
     if (p.invuln > 0) {
       this.spawnSparks(cx, cy, 7, "#bcd8ff", 0.6);
       this.stats.dashThroughs++;
+      this.spawnFloat(p.x, CFG.PLAYER_Y - 104, "闪身步", "#7fe4ef", 20);
       this.events.push("dashThrough");
       return;
     }
@@ -579,5 +617,8 @@
     }
   };
 
-  return { Game: Game, CFG: CFG, WAVES: WAVES, mulberry32: mulberry32 };
+  return {
+    Game: Game, CFG: CFG, WAVES: WAVES,
+    mulberry32: mulberry32, telegraphBeat: telegraphBeat,
+  };
 });

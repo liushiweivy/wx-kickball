@@ -9,8 +9,13 @@
   - 踢冷却 0.30s（乱按不能全覆盖）；闪身 0.28s、无敌帧 0.20s
   - 危球 26 血踢不了只能闪身；架势满玩家崩 1.1s / 敌人踉跄 2.5s 内被金球命中忍杀秒杀一管
   - 敌人横向漂移追玩家，反弹球在飞时冻结漂移保证必中
-- **测试 18/18 全绿**：`node --test tests/core.test.mjs tests/balance.test.mjs`
+- **测试 20/20 全绿**：`node --test tests/core.test.mjs tests/balance.test.mjs`
   - 平衡 bot：5 种子满血通关 62–77s、27–32 完美踢；乱按 bot 必败；站桩敌不掉血
+- **花鼓灯梗完善（2026-10-15）**：百度调研后把「闪身步」梗落到玩法包装上（不改平衡数值）
+  - 完美踢飘字「浪子踢球！」（花鼓灯本有同名动作）、闪身穿球飘字「闪身步！」/「闪身步」、崩架势飘字「哆嗦毛…」（楷体金字 pop+fade）
+  - 敌人蓄力改三拍鼓点（隆·咚·哐）：core 发 drum 事件（telegraphBeat 助手，render 共用），audio 合成低鼓，render 手下三盏鼓灯逐一点亮
+  - 闪身身姿侧倾 0.22rad（花鼓灯侧闪味）；标题页花鼓灯副标题；死亡页「鼓点没踩上」；战功称号：无伤「伞森步·身法大成」（王嘉尔口误梗）/ ≥60 血「浪子踢球·名手」/ 残血「鼓架子还得再练」
+  - harness + Playwright 逐屏验证 6 张截图归档 docs/kick-meme-*.png；bot 无伤通关 61.6s / 25 完美踢
 - **表现层**：render.js（月夜城楼、火柴人、球拖尾、危字、虚拟按键+冷却扇形、HUD/标题/死/战功）、audio.js（合成音效）、main.js（wx 画布/DPR/触摸/固定步长）
 - **浏览器 harness 真机验证**：harness/index.html（wx shim）+ Playwright 注入 bot
   - 标题、实战（赤甲双血条+金球飞行）、战功页截图均正常；bot 满血通关 61.8s / 26 完美踢 / 4 忍杀
@@ -26,7 +31,14 @@
 - 静态服务脚本：`%TEMP%\kick-serve.mjs`（端口 8778，根目录 wx-kickball；注意 resolve 统一盘符斜杠，否则 403）
 - 截图：E:\1workspace\kick-{title,fight,victory}.png
 
-## Code review（2026-10-15，code-reviewer，0 CRITICAL / 2 HIGH，已全部修复）
+## Code review 第二轮（2026-10-15，梗改动，APPROVE：0 CRITICAL / 0 HIGH / 1 MEDIUM / 3 LOW）
+
+- MEDIUM：飘字贴墙出屏裁切 → spawnFloat 内横向夹取 [64, W-64]，加测试
+- LOW：鼓点节拍公式 core/render 两处重复 → 导出 telegraphBeat 共用（render UMD 注入 require("./core.js")，harness/微信均支持）
+- LOW：drawEnemy 超长 → 抽出 drawTelegraph；称号逻辑抽出 victoryRank；castDur/3 > 0.05 帧上限写注释钉住
+- 轮外发现（首轮前就存在）：main.js 帧前事件预排空不消费，120Hz 屏可能重复播放按键音 → 播放后 `events.length = 0`
+
+## Code review 第一轮（2026-10-15，code-reviewer，0 CRITICAL / 2 HIGH，已全部修复）
 
 - HIGH：帧间事件（kick/dash 按键音、start/wave 开场鼓）被 update 清队列丢弃 → main.js 步进前先排空一次
 - HIGH：Boss 已打掉血条段画成满血 → 已灭段 ratio=0（截图 docs/kick-bossbar.png 验证）

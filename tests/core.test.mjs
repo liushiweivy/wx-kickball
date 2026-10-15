@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { Game, CFG, WAVES, mulberry32 } = require("../js/core.js");
+const { Game, CFG, WAVES, mulberry32, telegraphBeat } = require("../js/core.js");
 
 const DT = 1 / 60;
 function newGame(seed = 7) {
@@ -70,6 +70,7 @@ test("完美踢：球贴身前 0.2s 内按踢，金球反弹，命中敌人掉�
   g.press("kick");
   step(g, 6);
   assert.ok(g.seen.includes("perfectKick"), JSON.stringify(g.seen));
+  assert.ok(g.floatTexts.some((t) => t.text.includes("浪子踢球")), "完美踢应飘字「浪子踢球」");
   const ball = g.balls[0];
   assert.equal(ball.dir, "up");
   assert.equal(ball.returned, true);
@@ -128,6 +129,7 @@ test("危球：按踢也受 26 重伤；闪身无敌帧可无伤穿过", () => {
   assert.ok(g2.seen.includes("perilDash"), JSON.stringify(g2.seen));
   assert.equal(g2.player.hp, 100);
   assert.equal(g2.stats.dashThroughs, 1); // 危球闪身同样计入穿球统计
+  assert.ok(g2.floatTexts.some((t) => t.text.includes("闪身步")), "危球闪身应飘字「闪身步」");
 });
 
 test("漏球：球从身侧飞过、落出屏幕无伤，球被移除", () => {
@@ -153,12 +155,41 @@ test("踢有冷却：0.3s 内连按不刷新判定窗（乱按不能无敌）", 
   assert.ok(g.player.kickAge < 0.05); // 冷却后可重新开窗
 });
 
+test("花鼓灯鼓点：敌人蓄力期间按 1/3、2/3 进度敲鼓，出球时第三声", () => {
+  const g = track(newGame());
+  const e = g.enemy;
+  e.state = "telegraph";
+  e.stateT = 0;
+  e.castDur = 0.6;
+  e.castKind = "normal";
+  step(g, 13); // 0.217s：过第一拍
+  assert.ok(g.seen.includes("drum"), JSON.stringify(g.seen));
+  const drumsBefore = g.seen.filter((x) => x === "drum").length;
+  step(g, 13); // 0.433s：过第二拍
+  assert.ok(g.seen.filter((x) => x === "drum").length >= drumsBefore + 1);
+  step(g, 14); // 0.667s：第三拍 = 出球
+  assert.ok(g.seen.includes("fire"));
+});
+
+test("节拍助手/飘字夹取：内核与渲染共用的鼓点公式及贴墙飘字不出屏", () => {
+  assert.equal(telegraphBeat(0, 0.6), 0);
+  assert.equal(telegraphBeat(0.21, 0.6), 1);
+  assert.equal(telegraphBeat(0.6, 0.6), 3);
+  const g = newGame();
+  g.spawnFloat(0, 600, "浪子踢球！", "#ffd45e", 24);
+  g.spawnFloat(CFG.WORLD_W + 50, 600, "闪身步！", "#7fe4ef", 24);
+  const floats = g.floatTexts;
+  assert.ok(floats[0].x >= 64 && floats[0].x <= CFG.WORLD_W - 64);
+  assert.ok(floats[1].x >= 64 && floats[1].x <= CFG.WORLD_W - 64);
+});
+
 test("玩家架势满 → 崩架势硬直，期间不能踢/闪身，之后清零恢复", () => {
   const g = newGame();
   g.player.posture = 100;
   step(g, 1);
   assert.equal(g.player.state, "break");
   assert.ok(g.events.includes("break"));
+  assert.ok(g.floatTexts.some((t) => t.text.includes("哆嗦毛")), "崩架势应飘字「哆嗦毛」");
   g.press("kick");
   g.press("dash");
   assert.equal(g.player.kickAge > 0.4 || g.player.kickAge === 0, true); // kick 未开窗

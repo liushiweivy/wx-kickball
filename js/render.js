@@ -4,10 +4,12 @@
  * 所有游戏元素都画在 450x800 的逻辑世界内，由 main.js 负责缩放/偏移。
  */
 (function (root, factory) {
-  if (typeof module === "object" && module.exports) module.exports = factory();
-  else root.KickballRender = factory();
-})(typeof self !== "undefined" ? self : this, function () {
+  if (typeof module === "object" && module.exports) module.exports = factory(require("./core.js"));
+  else root.KickballRender = factory(root.Kickball);
+})(typeof self !== "undefined" ? self : this, function (core) {
   "use strict";
+
+  var telegraphBeat = core.telegraphBeat;
 
   var W = 450;
   var H = 800;
@@ -58,6 +60,7 @@
     for (var i = 0; i < g.balls.length; i++) drawBall(ctx, g.balls[i]);
     drawPlayer(ctx, g, view.kickAnimDur);
     drawFx(ctx, g);
+    drawFloatTexts(ctx, g);
     drawHud(ctx, g);
     drawButtons(ctx, g, view.pressed, view.kickCooldown);
     if (g.banner) drawBanner(ctx, g.banner);
@@ -189,16 +192,70 @@
       ctx.globalAlpha = 1;
     }
 
-    // 无敌帧微光
+    // 无敌帧微光（闪身时身体侧倾，花鼓灯「侧闪」味）
     if (p.invuln > 0) {
       ctx.save();
       ctx.shadowColor = COL.dash;
       ctx.shadowBlur = 16;
+      if (p.state === "dash") {
+        ctx.translate(x, y);
+        ctx.rotate(p.dashDir * 0.22);
+        ctx.translate(-x, -y);
+      }
       stick(ctx, x, y, { color: p.state === "dash" ? COL.dash : color, kick: 0 });
       ctx.restore();
     } else {
       var kickPose = p.kickAnim > 0 ? p.kickAnim / kickAnimDur : 0;
       stick(ctx, x, y, { color: color, kick: kickPose });
+    }
+  }
+
+  // 敌人蓄力表现：手中蓄力球 + 花鼓灯三点鼓灯（隆咚哐）+ 危球警告
+  function drawTelegraph(ctx, e, x, y, time) {
+    var prog = Math.min(1, e.stateT / e.castDur);
+    var peril = e.castKind === "peril";
+    var col = peril ? COL.peril : COL.ball;
+    var hx = x, hy = y - 56;
+    ctx.save();
+    ctx.shadowColor = col;
+    ctx.shadowBlur = 12 + prog * 22;
+    ctx.fillStyle = col;
+    ctx.globalAlpha = 0.55 + prog * 0.45;
+    ctx.beginPath();
+    ctx.arc(hx, hy, 5 + prog * 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    var lit = Math.min(3, telegraphBeat(e.stateT, e.castDur) + 1);
+    var beatCol = peril ? COL.peril : COL.gold;
+    for (var bi = 0; bi < 3; bi++) {
+      ctx.beginPath();
+      ctx.arc(hx - 22 + bi * 22, hy + 28, 4.5, 0, Math.PI * 2);
+      if (bi < lit) {
+        ctx.fillStyle = beatCol;
+        ctx.shadowColor = beatCol;
+        ctx.shadowBlur = 8;
+      } else {
+        ctx.fillStyle = "rgba(255,255,255,0.18)";
+        ctx.shadowBlur = 0;
+      }
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    if (peril) {
+      ctx.save();
+      ctx.globalAlpha = 0.6 + 0.4 * Math.sin(time * 16);
+      ctx.strokeStyle = COL.peril;
+      ctx.lineWidth = 3;
+      rr(ctx, x - 26, y - 112, 52, 34, 6);
+      ctx.stroke();
+      ctx.fillStyle = COL.peril;
+      ctx.font = "bold 24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("危", x, y - 95);
+      ctx.restore();
     }
   }
 
@@ -221,40 +278,8 @@
     stick(ctx, x, y, { color: base, scale: 1.12 });
     ctx.restore();
 
-    // 蓄力中的球（举在手上）
-    if (e.state === "telegraph") {
-      var prog = Math.min(1, e.stateT / e.castDur);
-      var peril = e.castKind === "peril";
-      var col = peril ? COL.peril : COL.ball;
-      var r = 5 + prog * 9;
-      var hx = x, hy = y - 56;
-      ctx.save();
-      ctx.shadowColor = col;
-      ctx.shadowBlur = 12 + prog * 22;
-      ctx.fillStyle = col;
-      ctx.globalAlpha = 0.55 + prog * 0.45;
-      ctx.beginPath();
-      ctx.arc(hx, hy, r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-
-      // 危字警告 + 自身描边脉冲
-      if (peril) {
-        var pulse = 0.6 + 0.4 * Math.sin(time * 16);
-        ctx.save();
-        ctx.globalAlpha = pulse;
-        ctx.strokeStyle = COL.peril;
-        ctx.lineWidth = 3;
-        rr(ctx, x - 26, y - 112, 52, 34, 6);
-        ctx.stroke();
-        ctx.fillStyle = COL.peril;
-        ctx.font = "bold 24px sans-serif";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText("危", x, y - 95);
-        ctx.restore();
-      }
-    }
+    // 蓄力中的球（举在手上）+ 鼓点指示灯 + 危字警告
+    if (e.state === "telegraph") drawTelegraph(ctx, e, x, y, time);
 
     // 踉跄 stars
     if (e.state === "stagger") {
@@ -321,6 +346,29 @@
       }
     }
     ctx.globalAlpha = 1;
+  }
+
+  /* ---------- 招式名飘字 ---------- */
+
+  function drawFloatTexts(ctx, g) {
+    for (var i = 0; i < g.floatTexts.length; i++) {
+      var t = g.floatTexts[i];
+      var k = t.t / t.life;
+      var pop = t.t < 0.12 ? 0.7 + (t.t / 0.12) * 0.3 : 1; // 出场轻微放大
+      ctx.save();
+      ctx.globalAlpha = k < 0.7 ? 1 : 1 - (k - 0.7) / 0.3;
+      ctx.translate(t.x, t.y);
+      ctx.scale(pop, pop);
+      ctx.font = "bold " + t.size + "px KaiTi, STKaiti, serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = "rgba(8,10,24,0.75)";
+      ctx.strokeText(t.text, 0, 0);
+      ctx.fillStyle = t.color;
+      ctx.fillText(t.text, 0, 0);
+      ctx.restore();
+    }
   }
 
   /* ---------- HUD ---------- */
@@ -444,18 +492,28 @@
     ctx.fillRect(0, 0, W, H);
   }
 
+  // 战功称号（花鼓灯梗）：无伤 = 王嘉尔口误「伞森步」；残血 = 鼓架子再练
+  function victoryRank(hp) {
+    if (hp >= 100) return "称号 ·「伞森步 · 身法大成」";
+    if (hp >= 60) return "称号 ·「浪子踢球 · 名手」";
+    return "称号 ·「鼓架子还得再练」";
+  }
+
   function drawOverlay(ctx, g) {
     ctx.textAlign = "center";
     if (g.mode === "title") {
       overlay(ctx, 0.72);
       ctx.fillStyle = "#f4ecd8";
       ctx.font = "bold 44px sans-serif";
-      ctx.fillText("影狼 · 弹踢道场", W / 2, 300);
+      ctx.fillText("影狼 · 弹踢道场", W / 2, 292);
+      ctx.font = "14px KaiTi, STKaiti, serif";
+      ctx.fillStyle = "rgba(127,228,239,0.85)";
+      ctx.fillText("—— 花鼓灯身法：闪身步 × 浪子踢球 ——", W / 2, 324);
       ctx.font = "17px sans-serif";
       ctx.fillStyle = "rgba(255,255,255,0.8)";
-      ctx.fillText("白球 · 贴身一瞬按「踢」，金球反弹打敌", W / 2, 360);
-      ctx.fillText("红球「危」· 踢不得，按「闪身」无敌帧穿过", W / 2, 390);
-      ctx.fillText("左下移动对齐，打穿三阵 · 赤甲两管血", W / 2, 420);
+      ctx.fillText("白球 ·「浪子踢球」贴身一瞬，金球反弹打敌", W / 2, 366);
+      ctx.fillText("红球「危」· 踢不得，「闪身步」侧撤穿过", W / 2, 396);
+      ctx.fillText("左下移动对齐，打穿三阵 · 赤甲两管血", W / 2, 426);
       ctx.fillStyle = COL.gold;
       ctx.font = "600 22px sans-serif";
       var blink = 0.55 + 0.45 * Math.sin((g.time || 0) * 5);
@@ -470,6 +528,9 @@
       ctx.shadowBlur = 26;
       ctx.fillText("死", W / 2, 380);
       ctx.shadowBlur = 0;
+      ctx.fillStyle = "rgba(255,180,160,0.9)";
+      ctx.font = "16px KaiTi, STKaiti, serif";
+      ctx.fillText("鼓点没踩上，再听一遍「隆咚哐」", W / 2, 424);
       ctx.fillStyle = "rgba(255,255,255,0.85)";
       ctx.font = "600 20px sans-serif";
       ctx.fillText("点击屏幕 重开本阵", W / 2, 460);
@@ -483,12 +544,16 @@
       ctx.shadowBlur = 0;
       ctx.fillStyle = "rgba(255,255,255,0.9)";
       ctx.font = "18px sans-serif";
-      ctx.fillText("通关用时 " + g.stats.clearT.toFixed(1) + " 秒", W / 2, 350);
-      ctx.fillText("完美反弹 " + g.stats.perfectKicks + " 次", W / 2, 384);
-      ctx.fillText("闪身穿球 " + g.stats.dashThroughs + " 次", W / 2, 418);
+      ctx.fillText("通关用时 " + g.stats.clearT.toFixed(1) + " 秒", W / 2, 344);
+      ctx.fillText("完美反弹 " + g.stats.perfectKicks + " 次", W / 2, 378);
+      ctx.fillText("闪身穿球 " + g.stats.dashThroughs + " 次", W / 2, 412);
+      // 称号（花鼓灯梗）：无伤 = 王嘉尔口误「伞森步」；残血 = 鼓架子再练
+      var title2 = victoryRank(g.player.hp);
       ctx.fillStyle = COL.gold;
+      ctx.font = "600 19px KaiTi, STKaiti, serif";
+      ctx.fillText(title2, W / 2, 462);
       ctx.font = "600 20px sans-serif";
-      ctx.fillText("点击屏幕 再战", W / 2, 490);
+      ctx.fillText("点击屏幕 再战", W / 2, 508);
     }
   }
 

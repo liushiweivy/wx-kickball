@@ -126,8 +126,12 @@ function frame() {
   acc += Math.min(dt, 0.1);
 
   // update() 开帧会清空事件队列；触摸回调（按键音）和 start/restart（开场鼓）
-  // 发生在两帧之间，步进前先排空一次，否则这些事件会被静默丢弃
-  for (var k = 0; k < game.events.length; k++) audio.onEvent(game.events[k]);
+  // 发生在两帧之间，步进前先排空一次，否则这些事件会被静默丢弃。
+  // 播放后立刻清空：120Hz 屏可能连续两帧都不满足步进，不清会重复播音效。
+  if (game.events.length) {
+    for (var k = 0; k < game.events.length; k++) audio.onEvent(game.events[k]);
+    game.events.length = 0;
+  }
 
   var guard = 0;
   while (acc >= STEP && guard < 5) {
