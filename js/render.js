@@ -110,6 +110,18 @@
 
   /* ---------- 火柴人 ---------- */
 
+  // 一条腿：髋 →（屈膝时）膝点朝脚尖方向顶出 → 脚尖
+  function legPath(ctx, hx, hipY, toeX, toeY, bend, s) {
+    ctx.moveTo(hx, hipY);
+    if (bend > 0.08) {
+      var dir = toeX === 0 ? 1 : toeX > 0 ? 1 : -1;
+      var kx = hx + toeX * 0.42 + dir * bend * 5 * s;
+      var ky = hipY + (toeY - hipY) * 0.52 + 2 * s;
+      ctx.lineTo(kx, ky);
+    }
+    ctx.lineTo(hx + toeX, toeY);
+  }
+
   function stick(ctx, x, y, opt) {
     // y = 脚底；正面小人，单位比例固定
     var s = opt.scale || 1;
@@ -120,9 +132,12 @@
     ctx.lineJoin = "round";
     ctx.lineWidth = 4 * s;
 
-    var hipY = y - 34 * s;
-    var shoulderY = y - 58 * s;
-    var headY = y - 74 * s;
+    // bodyLift=腾空整体上移（投影仍钉地面）；crouch=沉身（髋/肩/头下压，脚不动）
+    var bodyUp = (opt.bodyLift || 0) * s;
+    var crouch = (opt.crouch || 0) * s;
+    var hipY = y - 34 * s - bodyUp + crouch;
+    var shoulderY = y - 58 * s - bodyUp + crouch;
+    var headY = y - 74 * s - bodyUp + crouch;
 
     // 投影
     ctx.fillStyle = "rgba(0,0,0,0.35)";
@@ -142,9 +157,11 @@
       var lift = (1 - Math.abs(k - 0.5) * 2); // 0..1 抛物线
       ctx.lineTo(x + 6 * s * lift, hipY - 30 * s * lift);
     } else {
-      ctx.lineTo(x - 8 * s, y);
-      ctx.moveTo(x, hipY);
-      ctx.lineTo(x + 8 * s, y);
+      // 缺省即旧站姿：脚尖 ±8、零抬零屈
+      legPath(ctx, x, hipY, (opt.lToe != null ? opt.lToe : -8) * s,
+        y - (opt.lLift || 0) * s, opt.lBend || 0, s);
+      legPath(ctx, x, hipY, (opt.rToe != null ? opt.rToe : 8) * s,
+        y - (opt.rLift || 0) * s, opt.rBend || 0, s);
     }
     ctx.stroke();
 
@@ -162,10 +179,15 @@
       ctx.moveTo(x, shoulderY + 4 * s);
       ctx.lineTo(x + 12 * s, shoulderY + 12 * s);
     } else {
+      // 手腕偏移相对肩点 shoulderY+4；缺省即旧站姿 ±11,+16
+      var ldx = (opt.lArmDX != null ? opt.lArmDX : -11) * s;
+      var ldy = (opt.lArmDY != null ? opt.lArmDY : 16) * s;
+      var rdx = (opt.rArmDX != null ? opt.rArmDX : 11) * s;
+      var rdy = (opt.rArmDY != null ? opt.rArmDY : 16) * s;
       ctx.moveTo(x, shoulderY + 4 * s);
-      ctx.lineTo(x - 11 * s, shoulderY + 20 * s);
+      ctx.lineTo(x + ldx, shoulderY + 4 * s + ldy);
       ctx.moveTo(x, shoulderY + 4 * s);
-      ctx.lineTo(x + 11 * s, shoulderY + 20 * s);
+      ctx.lineTo(x + rdx, shoulderY + 4 * s + rdy);
     }
     ctx.stroke();
 
@@ -176,6 +198,95 @@
     ctx.fillRect(x - 9 * s, headY - 4 * s, 18 * s, 4 * s);
   }
 
+  /* ---------- 闪身姿态曲线（纯表现：core 的位移/无敌帧判定零变化） ----------
+     u = stateT / DASH_TIME（0..1），dir = -1|0|1（冲刺方向）。
+     动作语言：起手双臂先向后下甩出、沉身（双脚仍钉地）→ 后腿蹬地、
+     前腿抬起前跨 → 腾空错步（小跳弧、身体前倾）→ 前脚跨大步落地、后脚收步。
+     u=0 与 u=1 都严格等于默认站姿，无缝接 idle。dir=0 为原地沉身顿步。 */
+  var DEFAULT_POSE = {
+    lToe: -8, rToe: 8, lLift: 0, rLift: 0, lBend: 0, rBend: 0,
+    lArmDX: -11, lArmDY: 16, rArmDX: 11, rArmDY: 16,
+    crouch: 0, lean: 0, bodyLift: 0,
+  };
+
+  function seg(u, s, e) { return u <= s ? 0 : u >= e ? 1 : (u - s) / (e - s); }
+  function smooth(x) { return x * x * (3 - 2 * x); }
+  function cleanZero(v) { return Math.abs(v) < 1e-8 ? 0 : v; }
+
+  function dashPoseAt(u, dir) {
+    var p = {
+      lToe: -8, rToe: 8, lLift: 0, rLift: 0, lBend: 0, rBend: 0,
+      lArmDX: -11, lArmDY: 16, rArmDX: 11, rArmDY: 16,
+      crouch: 0, lean: 0, bodyLift: 0,
+    };
+    if (!dir) {
+      // 原地闪身：沉身顿步 + 双手下摆，左右严格对称、不横倾
+      var c0 = Math.sin(Math.PI * Math.min(1, u / 0.82));
+      p.crouch = 7 * c0;
+      p.lArmDX = -11 - 5 * c0;
+      p.rArmDX = 11 + 5 * c0;
+      p.lArmDY = 16 + 6 * c0;
+      p.rArmDY = 16 + 6 * c0;
+      Object.keys(p).forEach(function (k) { p[k] = cleanZero(p[k]); });
+      return p;
+    }
+    var d = dir > 0 ? 1 : -1;
+    var f = d > 0 ? "r" : "l"; // 前脚（冲刺方向）
+    var b = d > 0 ? "l" : "r"; // 后脚
+
+    // 分段包络
+    var wind = smooth(seg(u, 0, 0.1)) * (1 - smooth(seg(u, 0.1, 0.24)));  // 起手甩手
+    var armFly = smooth(seg(u, 0.24, 0.46)) * (1 - smooth(seg(u, 0.74, 0.92))); // 腾空摆臂
+    var tuckF = smooth(seg(u, 0.12, 0.28));  // 前腿抬起前跨
+    var landF = smooth(seg(u, 0.6, 0.8));    // 前脚下踩
+    var tuckB = smooth(seg(u, 0.16, 0.34));  // 后腿折叠
+    var landB = smooth(seg(u, 0.68, 0.88));  // 后脚收步
+    var settle = smooth(seg(u, 0.86, 1));    // 末段收脚回站姿
+    var flyLean = smooth(seg(u, 0.16, 0.34)) * (1 - smooth(seg(u, 0.78, 0.96)));
+
+    // 手：默认站姿 → 起手向后下甩 → 腾空前后摆臂
+    p[f + "ArmDX"] = 11 * d + wind * (-18 * d) + armFly * (7 * d);
+    p[f + "ArmDY"] = 16 + wind * 6 + armFly * -14;
+    p[b + "ArmDX"] = -11 * d + wind * (-11 * d) + armFly * (-6 * d);
+    p[b + "ArmDY"] = 16 + wind * 7 + armFly * -10;
+
+    // 前脚：蹬出抬起、前跨、下踩落地，末段收步
+    p[f + "Toe"] = d * (8 + 14 * tuckF * (1 - settle));
+    p[f + "Lift"] = 13 * tuckF * (1 - landF);
+    p[f + "Bend"] = 0.5 * tuckF * (1 - landF);
+    // 后脚：屈膝蹬地、折叠拖随、收步回位
+    p[b + "Toe"] = -d * (8 + 4 * tuckB * (1 - landB));
+    p[b + "Lift"] = 13 * tuckB * (1 - landB);
+    p[b + "Bend"] = tuckB * (1 - landB);
+
+    p.bodyLift = 10 * Math.sin(seg(u, 0.24, 0.72) * Math.PI); // 小跳弧
+    p.crouch = 5 * wind;                                       // 起手沉身
+    p.lean = d * (-0.12 * wind + 0.24 * flyLean);              // 先反扭后前倾
+
+    Object.keys(p).forEach(function (k) { p[k] = cleanZero(p[k]); });
+    return p;
+  }
+
+  function poseOpt(pose, color) {
+    var o = { color: color };
+    Object.keys(pose).forEach(function (k) { o[k] = pose[k]; });
+    return o;
+  }
+
+  // 闪身中的小人：绕脚底按 lean 侧倾；glow=无敌帧青色微光
+  function drawDashing(ctx, x, y, pose, color, glow) {
+    ctx.save();
+    if (glow) {
+      ctx.shadowColor = COL.dash;
+      ctx.shadowBlur = 16;
+    }
+    ctx.translate(x, y);
+    ctx.rotate(pose.lean);
+    ctx.translate(-x, -y);
+    stick(ctx, x, y, poseOpt(pose, color));
+    ctx.restore();
+  }
+
   function drawPlayer(ctx, g, kickAnimDur) {
     var p = g.player;
     var x = p.x, y = 690;
@@ -183,26 +294,25 @@
     if (p.state === "hurt") color = "#ff9b8e";
     if (p.state === "break") color = "#8a90a8";
 
-    // 闪身残影
     if (p.state === "dash") {
+      var u = Math.min(1, p.stateT / core.CFG.DASH_TIME);
+      var dir = p.dashDir;
+      // 残影：位置在身后，姿态取稍早时刻（手先甩脚后蹬的节奏同样可见）
       for (var i = 1; i <= 2; i++) {
         ctx.globalAlpha = 0.18 / i;
-        stick(ctx, x - p.dashDir * 22 * i, y, { color: COL.dash });
+        drawDashing(ctx, x - dir * 22 * i, y, dashPoseAt(Math.max(0, u - i * 0.05), dir), COL.dash, false);
       }
       ctx.globalAlpha = 1;
+      drawDashing(ctx, x, y, dashPoseAt(u, dir), p.invuln > 0 ? COL.dash : color, p.invuln > 0);
+      return;
     }
 
-    // 无敌帧微光（闪身时身体侧倾，花鼓灯「侧闪」味）
+    // 无敌帧微光（保险分支：当前 core 只有闪身给无敌帧）
     if (p.invuln > 0) {
       ctx.save();
       ctx.shadowColor = COL.dash;
       ctx.shadowBlur = 16;
-      if (p.state === "dash") {
-        ctx.translate(x, y);
-        ctx.rotate(p.dashDir * 0.22);
-        ctx.translate(-x, -y);
-      }
-      stick(ctx, x, y, { color: p.state === "dash" ? COL.dash : color, kick: 0 });
+      stick(ctx, x, y, { color: color, kick: 0 });
       ctx.restore();
     } else {
       var kickPose = p.kickAnim > 0 ? p.kickAnim / kickAnimDur : 0;
@@ -557,5 +667,5 @@
     }
   }
 
-  return { W: W, H: H, BUTTONS: BUTTONS, drawScene: drawScene };
+  return { W: W, H: H, BUTTONS: BUTTONS, drawScene: drawScene, dashPoseAt: dashPoseAt };
 });
