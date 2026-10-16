@@ -119,6 +119,11 @@ wx.onShow(function () { last = Date.now(); });
 var STEP = 1 / 60;
 var acc = 0;
 
+// 真机音频节点若缺失/语义偏差，音效失败只静音，绝不能让异常逃出帧循环冻结游戏
+function playEvent(ev) {
+  try { audio.onEvent(ev); } catch (e) { /* 静默降级 */ }
+}
+
 function frame() {
   var now = Date.now();
   var dt = (now - last) / 1000;
@@ -129,14 +134,14 @@ function frame() {
   // 发生在两帧之间，步进前先排空一次，否则这些事件会被静默丢弃。
   // 播放后立刻清空：120Hz 屏可能连续两帧都不满足步进，不清会重复播音效。
   if (game.events.length) {
-    for (var k = 0; k < game.events.length; k++) audio.onEvent(game.events[k]);
+    for (var k = 0; k < game.events.length; k++) playEvent(game.events[k]);
     game.events.length = 0;
   }
 
   var guard = 0;
   while (acc >= STEP && guard < 5) {
     game.update(STEP);
-    for (var i = 0; i < game.events.length; i++) audio.onEvent(game.events[i]);
+    for (var i = 0; i < game.events.length; i++) playEvent(game.events[i]);
     acc -= STEP;
     guard++;
   }
