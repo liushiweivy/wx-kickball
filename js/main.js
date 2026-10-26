@@ -6,6 +6,7 @@
 var core = require("./core.js");
 var renderMod = require("./render.js");
 var audioMod = require("./audio.js");
+var skillsMod = require("./skills.js");
 
 var Game = core.Game;
 var CFG = core.CFG;
@@ -66,6 +67,15 @@ var PROGRESS_KEY = "kickball_progress_v1";
 var progress = loadProgress();
 view.progress = progress;
 
+/* ---------- 招式注入：由进度派生，通关后重算 ---------- */
+
+function applySkills() {
+  var list = skillsMod.unlockedFor(progress);
+  game.setSkills(list);
+  view.skills = list;
+}
+applySkills();
+
 function loadProgress() {
   try {
     var raw = wx.getStorageSync(PROGRESS_KEY);
@@ -84,6 +94,7 @@ function onVictory() {
   progress = core.recordClear(progress, game.waveIndex, core.starsFor(game));
   view.progress = progress;
   saveProgress();
+  applySkills(); // 通关可能新悟招式，立刻注入
 }
 
 /* ---------- 触摸 ---------- */
@@ -102,6 +113,12 @@ function hitButton(p) {
     var b = BUTTONS[i];
     var dx = p.x - b.x, dy = p.y - b.y;
     if (dx * dx + dy * dy <= b.r * b.r) return b;
+  }
+  // 瞬身踢按钮：仅解锁后参与命中
+  if (view.skills && view.skills.indexOf("blinkKick") >= 0) {
+    var bb = renderMod.BUTTON_BLINK;
+    var bx = p.x - bb.x, by = p.y - bb.y;
+    if (bx * bx + by * by <= bb.r * bb.r) return bb;
   }
   return null;
 }
@@ -135,8 +152,13 @@ function tapOverlay(p) {
   audio.unlock();
   if (game.mode === "title") { game.toSelect(); return; }
   if (game.mode === "select") {
+    if (hitZone([renderMod.SKILL_ENTRY_ZONE], p)) { game.toSkills(); return; }
     var s = hitSelect(p);
     if (s && s.i < progress.unlocked) game.startLevel(s.i);
+    return;
+  }
+  if (game.mode === "skills") {
+    if (hitZone(renderMod.SKILLS_ZONES, p)) game.backFromSkills();
     return;
   }
   if (game.mode === "death") {
